@@ -1,0 +1,5 @@
+linux-upstream (3.16) unstable; urgency=low
+
+  * Custom built Linux kernel.
+
+ -- Anonymous <root@parrot>  Mon, 20 Oct 2014 22:11:07 +0200

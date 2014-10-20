@@ -1,0 +1,13 @@
+Package: linux-headers-3.16.3-parrot-amd64
+Source: linux-upstream
+Version: 3.16
+Architecture: amd64
+Maintainer: Anonymous <root@parrot>
+Installed-Size: 49954
+Provides: linux-headers, linux-headers-2.6
+Section: kernel
+Priority: optional
+Homepage: http://www.kernel.org/
+Description: Linux kernel headers for 3.16.3-parrot-amd64 on amd64
+ This package provides kernel header files for 3.16.3-parrot-amd64 on amd64
+ This is useful for people who need to build external modules

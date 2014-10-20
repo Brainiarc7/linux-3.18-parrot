@@ -1,0 +1,6 @@
+linux-headers-3.16.3-parrot-amd64_3.16_amd64.deb kernel optional
+linux-libc-dev_3.16_amd64.deb devel optional
+linux-image-3.16.3-parrot-amd64_3.16_amd64.deb kernel optional
+linux-headers-3.16.3-parrot-amd64_3.16_amd64.deb kernel optional
+linux-libc-dev_3.16_amd64.deb devel optional
+linux-image-3.16.3-parrot-amd64_3.16_amd64.deb kernel optional
