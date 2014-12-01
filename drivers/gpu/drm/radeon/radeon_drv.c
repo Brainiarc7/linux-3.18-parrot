@@ -351,6 +351,10 @@ static struct drm_driver kms_driver;
  */
 static bool radeon_firmware_installed(void)
 {
+#if IS_BUILTIN(CONFIG_DRM_RADEON)
+	/* It may be too early to tell.  Assume it's there. */
+	return true;
+#else
 	struct path path;
 
 	if (kern_path("/lib/firmware/radeon", LOOKUP_DIRECTORY | LOOKUP_FOLLOW,
@@ -360,6 +364,7 @@ static bool radeon_firmware_installed(void)
 	}
 
 	return false;
+#endif
 }
 
 #ifdef CONFIG_DRM_RADEON_UMS
@@ -469,6 +474,7 @@ static int radeon_pmops_runtime_suspend(struct device *dev)
 	ret = radeon_suspend_kms(drm_dev, false, false);
 	pci_save_state(pdev);
 	pci_disable_device(pdev);
+	pci_ignore_hotplug(pdev);
 	pci_set_power_state(pdev, PCI_D3cold);
 	drm_dev->switch_power_state = DRM_SWITCH_POWER_DYNAMIC_OFF;
 

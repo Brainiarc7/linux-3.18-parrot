@@ -137,8 +137,8 @@ kirkwood := \
 	kirkwood-openrd-client.dtb \
 	kirkwood-openrd-ultimate.dtb \
 	kirkwood-rd88f6192.dtb \
-	kirkwood-rd88f6281-a0.dtb \
-	kirkwood-rd88f6281-a1.dtb \
+	kirkwood-rd88f6281-z0.dtb \
+	kirkwood-rd88f6281-a.dtb \
 	kirkwood-rs212.dtb \
 	kirkwood-rs409.dtb \
 	kirkwood-rs411.dtb \
@@ -376,9 +376,11 @@ dtb-$(CONFIG_MACH_SUN6I) += \
 	sun6i-a31-colombus.dtb \
 	sun6i-a31-m9.dtb
 dtb-$(CONFIG_MACH_SUN7I) += \
+	sun7i-a20-bananapi.dtb \
 	sun7i-a20-cubieboard2.dtb \
 	sun7i-a20-cubietruck.dtb \
 	sun7i-a20-i12-tvbox.dtb \
+	sun7i-a20-olinuxino-lime.dtb \
 	sun7i-a20-olinuxino-micro.dtb
 dtb-$(CONFIG_ARCH_TEGRA) += tegra20-harmony.dtb \
 	tegra20-iris-512.dtb \

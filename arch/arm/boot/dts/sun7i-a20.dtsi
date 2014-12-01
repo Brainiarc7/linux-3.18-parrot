@@ -618,6 +618,13 @@
 				allwinner,pull = <0>;
 			};
 
+			uart3_pins_b: uart3@1 {
+				allwinner,pins = "PH0", "PH1";
+				allwinner,function = "uart3";
+				allwinner,drive = <0>;
+				allwinner,pull = <0>;
+			};
+
 			uart6_pins_a: uart6@0 {
 				allwinner,pins = "PI12", "PI13";
 				allwinner,function = "uart6";
@@ -704,6 +711,13 @@
 				allwinner,pull = <0>;
 			};
 
+			spi0_pins_a: spi0@0 {
+				allwinner,pins = "PI10", "PI11", "PI12", "PI13", "PI14";
+				allwinner,function = "spi0";
+				allwinner,drive = <0>;
+				allwinner,pull = <0>;
+			};
+
 			spi1_pins_a: spi1@0 {
 				allwinner,pins = "PI16", "PI17", "PI18", "PI19";
 				allwinner,function = "spi1";
@@ -737,6 +751,20 @@
 				allwinner,function = "mmc3";
 				allwinner,drive = <2>;
 				allwinner,pull = <0>;
+			};
+
+			ir0_pins_a: ir0@0 {
+				    allwinner,pins = "PB3","PB4";
+				    allwinner,function = "ir0";
+				    allwinner,drive = <0>;
+				    allwinner,pull = <0>;
+			};
+
+			ir1_pins_a: ir1@0 {
+				    allwinner,pins = "PB22","PB23";
+				    allwinner,function = "ir1";
+				    allwinner,drive = <0>;
+				    allwinner,pull = <0>;
 			};
 		};
 
