@@ -49,20 +49,21 @@
 #define KVM_NR_IRQCHIPS          1
 #define KVM_IRQCHIP_NUM_PINS     256
 
-#if !defined(CONFIG_KVM_440)
 #include <linux/mmu_notifier.h>
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
 
-struct kvm;
 extern int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
 extern int kvm_unmap_hva_range(struct kvm *kvm,
 			       unsigned long start, unsigned long end);
-extern int kvm_age_hva(struct kvm *kvm, unsigned long hva);
+extern int kvm_age_hva(struct kvm *kvm, unsigned long start, unsigned long end);
 extern int kvm_test_age_hva(struct kvm *kvm, unsigned long hva);
 extern void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
 
-#endif
+static inline void kvm_arch_mmu_notifier_invalidate_page(struct kvm *kvm,
+							 unsigned long address)
+{
+}
 
 #define HPTEG_CACHE_NUM			(1 << 15)
 #define HPTEG_HASH_BITS_PTE		13
@@ -79,10 +80,6 @@ extern void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
 /* Physical Address Mask - allowed range of real mode RAM access */
 #define KVM_PAM			0x0fffffffffffffffULL
 
-struct kvm;
-struct kvm_run;
-struct kvm_vcpu;
-
 struct lppaca;
 struct slb_shadow;
 struct dtl_entry;
@@ -97,7 +94,6 @@ struct kvm_vm_stat {
 struct kvm_vcpu_stat {
 	u32 sum_exits;
 	u32 mmio_exits;
-	u32 dcr_exits;
 	u32 signal_exits;
 	u32 light_exits;
 	/* Account for special types of light exits: */
@@ -114,22 +110,21 @@ struct kvm_vcpu_stat {
 	u32 halt_wakeup;
 	u32 dbell_exits;
 	u32 gdbell_exits;
+	u32 ld;
+	u32 st;
 #ifdef CONFIG_PPC_BOOK3S
 	u32 pf_storage;
 	u32 pf_instruc;
 	u32 sp_storage;
 	u32 sp_instruc;
 	u32 queue_intr;
-	u32 ld;
 	u32 ld_slow;
-	u32 st;
 	u32 st_slow;
 #endif
 };
 
 enum kvm_exit_types {
 	MMIO_EXITS,
-	DCR_EXITS,
 	SIGNAL_EXITS,
 	ITLB_REAL_MISS_EXITS,
 	ITLB_VIRT_MISS_EXITS,
@@ -149,6 +144,7 @@ enum kvm_exit_types {
 	EMULATED_TLBWE_EXITS,
 	EMULATED_RFI_EXITS,
 	EMULATED_RFCI_EXITS,
+	EMULATED_RFDI_EXITS,
 	DEC_EXITS,
 	EXT_INTR_EXITS,
 	HALT_WAKEUP,
@@ -310,6 +306,8 @@ struct kvmppc_vcore {
 	u32 arch_compat;
 	ulong pcr;
 	ulong dpdes;		/* doorbell state (POWER8) */
+	void *mpp_buffer; /* Micro Partition Prefetch buffer */
+	bool mpp_buffer_is_valid;
 };
 
 #define VCORE_ENTRY_COUNT(vc)	((vc)->entry_exit_count & 0xff)
@@ -508,8 +506,10 @@ struct kvm_vcpu_arch {
 #ifdef CONFIG_BOOKE
 	u32 decar;
 #endif
-	u32 tbl;
-	u32 tbu;
+	/* Time base value when we entered the guest */
+	u64 entry_tb;
+	u64 entry_vtb;
+	u64 entry_ic;
 	u32 tcr;
 	ulong tsr; /* we need to perform set/clr_bits() which requires ulong */
 	u32 ivor[64];
@@ -585,11 +585,11 @@ struct kvm_vcpu_arch {
 	u32 mmucfg;
 	u32 eptcfg;
 	u32 epr;
+	u64 sprg9;
+	u32 pwrmgtcr0;
 	u32 crit_save;
 	/* guest debug registers*/
 	struct debug_reg dbg_reg;
-	/* hardware visible debug registers when in guest state */
-	struct debug_reg shadow_dbg_reg;
 #endif
 	gpa_t paddr_accessed;
 	gva_t vaddr_accessed;
@@ -598,8 +598,6 @@ struct kvm_vcpu_arch {
 	u8 io_gpr; /* GPR used as IO source/target */
 	u8 mmio_is_bigendian;
 	u8 mmio_sign_extend;
-	u8 dcr_needed;
-	u8 dcr_is_write;
 	u8 osi_needed;
 	u8 osi_enabled;
 	u8 papr_enabled;
@@ -613,7 +611,6 @@ struct kvm_vcpu_arch {
 	u32 cpr0_cfgaddr; /* holds the last set cpr0_cfgaddr */
 
 	struct hrtimer dec_timer;
-	struct tasklet_struct tasklet;
 	u64 dec_jiffies;
 	u64 dec_expires;
 	unsigned long pending_exceptions;
@@ -687,5 +684,13 @@ struct kvm_vcpu_arch {
 
 #define __KVM_HAVE_ARCH_WQP
 #define __KVM_HAVE_CREATE_DEVICE
+
+static inline void kvm_arch_hardware_disable(void) {}
+static inline void kvm_arch_hardware_unsetup(void) {}
+static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+static inline void kvm_arch_memslots_updated(struct kvm *kvm) {}
+static inline void kvm_arch_flush_shadow_all(struct kvm *kvm) {}
+static inline void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu) {}
+static inline void kvm_arch_exit(void) {}
 
 #endif /* __POWERPC_KVM_HOST_H__ */

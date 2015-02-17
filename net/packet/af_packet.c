@@ -240,11 +240,9 @@ static void __fanout_link(struct sock *sk, struct packet_sock *po);
 static int packet_direct_xmit(struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
-	const struct net_device_ops *ops = dev->netdev_ops;
 	netdev_features_t features;
 	struct netdev_queue *txq;
 	int ret = NETDEV_TX_BUSY;
-	u16 queue_map;
 
 	if (unlikely(!netif_running(dev) ||
 		     !netif_carrier_ok(dev)))
@@ -255,17 +253,13 @@ static int packet_direct_xmit(struct sk_buff *skb)
 	    __skb_linearize(skb))
 		goto drop;
 
-	queue_map = skb_get_queue_mapping(skb);
-	txq = netdev_get_tx_queue(dev, queue_map);
+	txq = skb_get_tx_queue(dev, skb);
 
 	local_bh_disable();
 
 	HARD_TX_LOCK(dev, txq, smp_processor_id());
-	if (!netif_xmit_frozen_or_drv_stopped(txq)) {
-		ret = ops->ndo_start_xmit(skb, dev);
-		if (ret == NETDEV_TX_OK)
-			txq_trans_update(txq);
-	}
+	if (!netif_xmit_frozen_or_drv_stopped(txq))
+		ret = netdev_start_xmit(skb, dev, txq, false);
 	HARD_TX_UNLOCK(dev, txq);
 
 	local_bh_enable();
@@ -384,7 +378,7 @@ static void unregister_prot_hook(struct sock *sk, bool sync)
 		__unregister_prot_hook(sk, sync);
 }
 
-static inline __pure struct page *pgv_to_page(void *addr)
+static inline struct page * __pure pgv_to_page(void *addr)
 {
 	if (is_vmalloc_addr(addr))
 		return vmalloc_to_page(addr);
@@ -441,14 +435,10 @@ static __u32 tpacket_get_timestamp(struct sk_buff *skb, struct timespec *ts,
 {
 	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
 
-	if (shhwtstamps) {
-		if ((flags & SOF_TIMESTAMPING_SYS_HARDWARE) &&
-		    ktime_to_timespec_cond(shhwtstamps->syststamp, ts))
-			return TP_STATUS_TS_SYS_HARDWARE;
-		if ((flags & SOF_TIMESTAMPING_RAW_HARDWARE) &&
-		    ktime_to_timespec_cond(shhwtstamps->hwtstamp, ts))
-			return TP_STATUS_TS_RAW_HARDWARE;
-	}
+	if (shhwtstamps &&
+	    (flags & SOF_TIMESTAMPING_RAW_HARDWARE) &&
+	    ktime_to_timespec_cond(shhwtstamps->hwtstamp, ts))
+		return TP_STATUS_TS_RAW_HARDWARE;
 
 	if (ktime_to_timespec_cond(skb->tstamp, ts))
 		return TP_STATUS_TS_SOFTWARE;
@@ -3084,10 +3074,8 @@ static int packet_dev_mc(struct net_device *dev, struct packet_mclist *i,
 		break;
 	case PACKET_MR_PROMISC:
 		return dev_set_promiscuity(dev, what);
-		break;
 	case PACKET_MR_ALLMULTI:
 		return dev_set_allmulti(dev, what);
-		break;
 	case PACKET_MR_UNICAST:
 		if (i->alen != dev->addr_len)
 			return -EINVAL;

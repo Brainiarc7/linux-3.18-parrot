@@ -267,13 +267,13 @@ static irqreturn_t at91_adc_trigger_handler(int irq, void *p)
 }
 
 /* Handler for classic adc channel eoc trigger */
-void handle_adc_eoc_trigger(int irq, struct iio_dev *idev)
+static void handle_adc_eoc_trigger(int irq, struct iio_dev *idev)
 {
 	struct at91_adc_state *st = iio_priv(idev);
 
 	if (iio_buffer_enabled(idev)) {
 		disable_irq_nosync(irq);
-		iio_trigger_poll(idev->trig, iio_get_time_ns());
+		iio_trigger_poll(idev->trig);
 	} else {
 		st->last_value = at91_adc_readl(st, AT91_ADC_CHAN(st, st->chnb));
 		st->done = true;

@@ -1396,9 +1396,7 @@ static void radeon_pm_fini_old(struct radeon_device *rdev)
 	}
 
 	radeon_hwmon_fini(rdev);
-
-	if (rdev->pm.power_state)
-		kfree(rdev->pm.power_state);
+	kfree(rdev->pm.power_state);
 }
 
 static void radeon_pm_fini_dpm(struct radeon_device *rdev)
@@ -1417,9 +1415,7 @@ static void radeon_pm_fini_dpm(struct radeon_device *rdev)
 	radeon_dpm_fini(rdev);
 
 	radeon_hwmon_fini(rdev);
-
-	if (rdev->pm.power_state)
-		kfree(rdev->pm.power_state);
+	kfree(rdev->pm.power_state);
 }
 
 void radeon_pm_fini(struct radeon_device *rdev)
@@ -1560,7 +1556,7 @@ static bool radeon_pm_in_vbl(struct radeon_device *rdev)
 		if (rdev->pm.active_crtcs & (1 << crtc)) {
 			vbl_status = radeon_get_crtc_scanoutpos(rdev->ddev, crtc, 0, &vpos, &hpos, NULL, NULL);
 			if ((vbl_status & DRM_SCANOUTPOS_VALID) &&
-			    !(vbl_status & DRM_SCANOUTPOS_INVBL))
+			    !(vbl_status & DRM_SCANOUTPOS_IN_VBLANK))
 				in_vbl = false;
 		}
 	}

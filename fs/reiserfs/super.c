@@ -15,7 +15,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/time.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include "reiserfs.h"
 #include "acl.h"
 #include "xattr.h"
@@ -206,7 +206,7 @@ static int finish_unfinished(struct super_block *s)
 #ifdef CONFIG_QUOTA
 	int i;
 	int ms_active_set;
-	int quota_enabled[MAXQUOTAS];
+	int quota_enabled[REISERFS_MAXQUOTAS];
 #endif
 
 	/* compose key to look for "save" links */
@@ -227,7 +227,7 @@ static int finish_unfinished(struct super_block *s)
 		s->s_flags |= MS_ACTIVE;
 	}
 	/* Turn on quotas so that they are updated correctly */
-	for (i = 0; i < MAXQUOTAS; i++) {
+	for (i = 0; i < REISERFS_MAXQUOTAS; i++) {
 		quota_enabled[i] = 1;
 		if (REISERFS_SB(s)->s_qf_names[i]) {
 			int ret;
@@ -335,7 +335,7 @@ static int finish_unfinished(struct super_block *s)
 			 * not completed truncate found. New size was
 			 * committed together with "save" link
 			 */
-			reiserfs_info(s, "Truncating %k to %Ld ..",
+			reiserfs_info(s, "Truncating %k to %lld ..",
 				      INODE_PKEY(inode), inode->i_size);
 
 			/* don't update modification time */
@@ -370,7 +370,7 @@ static int finish_unfinished(struct super_block *s)
 #ifdef CONFIG_QUOTA
 	/* Turn quotas off */
 	reiserfs_write_unlock(s);
-	for (i = 0; i < MAXQUOTAS; i++) {
+	for (i = 0; i < REISERFS_MAXQUOTAS; i++) {
 		if (sb_dqopt(s)->files[i] && quota_enabled[i])
 			dquot_quota_off(s, i);
 	}
@@ -1360,7 +1360,7 @@ static void handle_quota_files(struct super_block *s, char **qf_names,
 {
 	int i;
 
-	for (i = 0; i < MAXQUOTAS; i++) {
+	for (i = 0; i < REISERFS_MAXQUOTAS; i++) {
 		if (qf_names[i] != REISERFS_SB(s)->s_qf_names[i])
 			kfree(REISERFS_SB(s)->s_qf_names[i]);
 		REISERFS_SB(s)->s_qf_names[i] = qf_names[i];
@@ -1381,7 +1381,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	struct reiserfs_journal *journal = SB_JOURNAL(s);
 	char *new_opts = kstrdup(arg, GFP_KERNEL);
 	int err;
-	char *qf_names[MAXQUOTAS];
+	char *qf_names[REISERFS_MAXQUOTAS];
 	unsigned int qfmt = 0;
 #ifdef CONFIG_QUOTA
 	int i;
@@ -1400,7 +1400,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	    (s, arg, &mount_options, &blocks, NULL, &commit_max_age,
 	    qf_names, &qfmt)) {
 #ifdef CONFIG_QUOTA
-		for (i = 0; i < MAXQUOTAS; i++)
+		for (i = 0; i < REISERFS_MAXQUOTAS; i++)
 			if (qf_names[i] != REISERFS_SB(s)->s_qf_names[i])
 				kfree(qf_names[i]);
 #endif
@@ -1581,7 +1581,7 @@ static int read_super_block(struct super_block *s, int offset)
 	rs = (struct reiserfs_super_block *)bh->b_data;
 	if (sb_blocksize(rs) != s->s_blocksize) {
 		reiserfs_warning(s, "sh-2011", "can't find a reiserfs "
-				 "filesystem on (dev %s, block %Lu, size %lu)",
+				 "filesystem on (dev %s, block %llu, size %lu)",
 				 s->s_id,
 				 (unsigned long long)bh->b_blocknr,
 				 s->s_blocksize);
@@ -1844,7 +1844,7 @@ static int reiserfs_fill_super(struct super_block *s, void *data, int silent)
 	char *jdev_name;
 	struct reiserfs_sb_info *sbi;
 	int errval = -EINVAL;
-	char *qf_names[MAXQUOTAS] = {};
+	char *qf_names[REISERFS_MAXQUOTAS] = {};
 	unsigned int qfmt = 0;
 
 	save_mount_options(s, data);
@@ -2161,6 +2161,9 @@ error_unlocked:
 		reiserfs_write_unlock(s);
 	}
 
+	if (sbi->commit_wq)
+		destroy_workqueue(sbi->commit_wq);
+
 	cancel_delayed_work_sync(&REISERFS_SB(s)->old_work);
 
 	reiserfs_free_bitmap_cache(s);
@@ -2169,7 +2172,7 @@ error_unlocked:
 #ifdef CONFIG_QUOTA
 	{
 		int j;
-		for (j = 0; j < MAXQUOTAS; j++)
+		for (j = 0; j < REISERFS_MAXQUOTAS; j++)
 			kfree(qf_names[j]);
 	}
 #endif
@@ -2445,8 +2448,7 @@ static ssize_t reiserfs_quota_write(struct super_block *sb, int type,
 	struct buffer_head tmp_bh, *bh;
 
 	if (!current->journal_info) {
-		printk(KERN_WARNING "reiserfs: Quota write (off=%Lu, len=%Lu)"
-			" cancelled because transaction is not started.\n",
+		printk(KERN_WARNING "reiserfs: Quota write (off=%llu, len=%llu) cancelled because transaction is not started.\n",
 			(unsigned long long)off, (unsigned long long)len);
 		return -EIO;
 	}

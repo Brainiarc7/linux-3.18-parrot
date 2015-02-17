@@ -162,7 +162,7 @@ EXPORT(sysn32_call_table)
 	PTR	sys_getpeername
 	PTR	sys_socketpair
 	PTR	compat_sys_setsockopt
-	PTR	sys_getsockopt
+	PTR	compat_sys_getsockopt
 	PTR	__sys_clone			/* 6055 */
 	PTR	__sys_fork
 	PTR	compat_sys_execve
@@ -424,7 +424,8 @@ EXPORT(sysn32_call_table)
 	PTR	sys_sched_setattr
 	PTR	sys_sched_getattr
 	PTR	sys_renameat2			/* 6315 */
-	PTR	sys_ni_syscall			/* seccomp */
-	PTR	sys_ni_syscall			/* getrandom */
+	PTR	sys_seccomp
+	PTR	sys_getrandom
 	PTR	sys_memfd_create
+	PTR	sys_bpf
 	.size	sysn32_call_table,.-sysn32_call_table

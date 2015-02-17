@@ -53,14 +53,14 @@ u64 kvm_supported_xcr0(void)
 	return xcr0;
 }
 
-void kvm_update_cpuid(struct kvm_vcpu *vcpu)
+int kvm_update_cpuid(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cpuid_entry2 *best;
 	struct kvm_lapic *apic = vcpu->arch.apic;
 
 	best = kvm_find_cpuid_entry(vcpu, 1, 0);
 	if (!best)
-		return;
+		return 0;
 
 	/* Update OSXSAVE bit */
 	if (cpu_has_xsave && best->function == 0x1) {
@@ -88,7 +88,17 @@ void kvm_update_cpuid(struct kvm_vcpu *vcpu)
 			xstate_required_size(vcpu->arch.xcr0);
 	}
 
+	/*
+	 * The existing code assumes virtual address is 48-bit in the canonical
+	 * address checks; exit if it is ever changed.
+	 */
+	best = kvm_find_cpuid_entry(vcpu, 0x80000008, 0);
+	if (best && ((best->eax & 0xff00) >> 8) != 48 &&
+		((best->eax & 0xff00) >> 8) != 0)
+		return -EINVAL;
+
 	kvm_pmu_cpuid_update(vcpu);
+	return 0;
 }
 
 static int is_efer_nx(void)
@@ -112,8 +122,8 @@ static void cpuid_fix_nx_cap(struct kvm_vcpu *vcpu)
 			break;
 		}
 	}
-	if (entry && (entry->edx & (1 << 20)) && !is_efer_nx()) {
-		entry->edx &= ~(1 << 20);
+	if (entry && (entry->edx & bit(X86_FEATURE_NX)) && !is_efer_nx()) {
+		entry->edx &= ~bit(X86_FEATURE_NX);
 		printk(KERN_INFO "kvm: guest NX capability removed\n");
 	}
 }
@@ -151,10 +161,9 @@ int kvm_vcpu_ioctl_set_cpuid(struct kvm_vcpu *vcpu,
 	}
 	vcpu->arch.cpuid_nent = cpuid->nent;
 	cpuid_fix_nx_cap(vcpu);
-	r = 0;
 	kvm_apic_set_version(vcpu);
 	kvm_x86_ops->cpuid_update(vcpu);
-	kvm_update_cpuid(vcpu);
+	r = kvm_update_cpuid(vcpu);
 
 out_free:
 	vfree(cpuid_entries);
@@ -178,9 +187,7 @@ int kvm_vcpu_ioctl_set_cpuid2(struct kvm_vcpu *vcpu,
 	vcpu->arch.cpuid_nent = cpuid->nent;
 	kvm_apic_set_version(vcpu);
 	kvm_x86_ops->cpuid_update(vcpu);
-	kvm_update_cpuid(vcpu);
-	return 0;
-
+	r = kvm_update_cpuid(vcpu);
 out:
 	return r;
 }
@@ -311,6 +318,10 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 		F(FSGSBASE) | F(BMI1) | F(HLE) | F(AVX2) | F(SMEP) |
 		F(BMI2) | F(ERMS) | f_invpcid | F(RTM) | f_mpx | F(RDSEED) |
 		F(ADX) | F(SMAP);
+
+	/* cpuid 0xD.1.eax */
+	const u32 kvm_supported_word10_x86_features =
+		F(XSAVEOPT) | F(XSAVEC) | F(XGETBV1);
 
 	/* all calls to cpuid_count() should be made on the same cpu */
 	get_cpu();
@@ -448,13 +459,18 @@ static inline int __do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 		entry->eax &= supported;
 		entry->edx &= supported >> 32;
 		entry->flags |= KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
+		if (!supported)
+			break;
+
 		for (idx = 1, i = 1; idx < 64; ++idx) {
 			u64 mask = ((u64)1 << idx);
 			if (*nent >= maxnent)
 				goto out;
 
 			do_cpuid_1_ent(&entry[i], function, idx);
-			if (entry[i].eax == 0 || !(supported & mask))
+			if (idx == 1)
+				entry[i].eax &= kvm_supported_word10_x86_features;
+			else if (entry[i].eax == 0 || !(supported & mask))
 				continue;
 			entry[i].flags |=
 			       KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
@@ -766,6 +782,12 @@ void kvm_cpuid(struct kvm_vcpu *vcpu, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 
 	if (!best)
 		best = check_cpuid_limit(vcpu, function, index);
+
+	/*
+	 * Perfmon not yet supported for L2 guest.
+	 */
+	if (is_guest_mode(vcpu) && function == 0xa)
+		best = NULL;
 
 	if (best) {
 		*eax = best->eax;

@@ -1751,9 +1751,6 @@ static struct snd_kcontrol_new snd_echo_vumeters_switch = {
 static int snd_echo_vumeters_info(struct snd_kcontrol *kcontrol,
 				  struct snd_ctl_elem_info *uinfo)
 {
-	struct echoaudio *chip;
-
-	chip = snd_kcontrol_chip(kcontrol);
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	uinfo->count = 96;
 	uinfo->value.integer.min = ECHOGAIN_MINOUT;
@@ -1795,9 +1792,6 @@ static struct snd_kcontrol_new snd_echo_vumeters = {
 static int snd_echo_channels_info_info(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_info *uinfo)
 {
-	struct echoaudio *chip;
-
-	chip = snd_kcontrol_chip(kcontrol);
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	uinfo->count = 6;
 	uinfo->value.integer.min = 0;

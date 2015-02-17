@@ -155,6 +155,8 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
 	cmpwi	r12, BOOK3S_INTERRUPT_EXTERNAL
 BEGIN_FTR_SECTION
 	beq	11f
+	cmpwi	cr2, r12, BOOK3S_INTERRUPT_HMI
+	beq	cr2, 14f			/* HMI check */
 END_FTR_SECTION_IFSET(CPU_FTR_ARCH_206)
 
 	/* RFI into the highmem handler, or branch to interrupt handler */
@@ -174,6 +176,10 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_206)
 	ba	0x500
 
 13:	b	machine_check_fwnmi
+
+14:	mtspr	SPRN_HSRR0, r8
+	mtspr	SPRN_HSRR1, r7
+	b	hmi_exception_after_realmode
 
 kvmppc_primary_no_guest:
 	/* We handle this much like a ceded vcpu */
@@ -349,6 +355,7 @@ kvmppc_hv_entry:
 	 * MSR = ~IR|DR
 	 * R13 = PACA
 	 * R1 = host R1
+	 * R2 = TOC
 	 * all other volatile GPRS = free
 	 */
 	mflr	r0
@@ -497,7 +504,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_ARCH_207S)
 toc_tlbie_lock:
 	.tc	native_tlbie_lock[TC],native_tlbie_lock
 	.previous
-	ld	r3,toc_tlbie_lock@toc(2)
+	ld	r3,toc_tlbie_lock@toc(r2)
 #ifdef __BIG_ENDIAN__
 	lwz	r8,PACA_LOCK_TOKEN(r13)
 #else
@@ -2042,6 +2049,7 @@ hcall_real_table:
 	.long	0		/* 0x12c */
 	.long	0		/* 0x130 */
 	.long	DOTSYM(kvmppc_h_set_xdabr) - hcall_real_table
+	.globl	hcall_real_table_end
 hcall_real_table_end:
 
 ignore_hdec:

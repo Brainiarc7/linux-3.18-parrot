@@ -267,6 +267,8 @@ static int kvmppc_h_pr_xics_hcall(struct kvm_vcpu *vcpu, u32 cmd)
 
 int kvmppc_h_pr(struct kvm_vcpu *vcpu, unsigned long cmd)
 {
+	int rc, idx;
+
 	if (cmd <= MAX_HCALL_OPCODE &&
 	    !test_bit(cmd/4, vcpu->kvm->arch.enabled_hcalls))
 		return EMULATE_FAIL;
@@ -299,8 +301,11 @@ int kvmppc_h_pr(struct kvm_vcpu *vcpu, unsigned long cmd)
 		break;
 	case H_RTAS:
 		if (list_empty(&vcpu->kvm->arch.rtas_tokens))
-			return RESUME_HOST;
-		if (kvmppc_rtas_hcall(vcpu))
+			break;
+		idx = srcu_read_lock(&vcpu->kvm->srcu);
+		rc = kvmppc_rtas_hcall(vcpu);
+		srcu_read_unlock(&vcpu->kvm->srcu, idx);
+		if (rc)
 			break;
 		kvmppc_set_gpr(vcpu, 3, 0);
 		return EMULATE_DONE;
@@ -309,6 +314,27 @@ int kvmppc_h_pr(struct kvm_vcpu *vcpu, unsigned long cmd)
 	return EMULATE_FAIL;
 }
 
+int kvmppc_hcall_impl_pr(unsigned long cmd)
+{
+	switch (cmd) {
+	case H_ENTER:
+	case H_REMOVE:
+	case H_PROTECT:
+	case H_BULK_REMOVE:
+	case H_PUT_TCE:
+	case H_CEDE:
+#ifdef CONFIG_KVM_XICS
+	case H_XIRR:
+	case H_CPPR:
+	case H_EOI:
+	case H_IPI:
+	case H_IPOLL:
+	case H_XIRR_X:
+#endif
+		return 1;
+	}
+	return 0;
+}
 
 /*
  * List of hcall numbers to enable by default.
@@ -337,7 +363,11 @@ static unsigned int default_hcall_list[] = {
 void kvmppc_pr_init_default_hcalls(struct kvm *kvm)
 {
 	int i;
+	unsigned int hcall;
 
-	for (i = 0; default_hcall_list[i]; ++i)
-		__set_bit(default_hcall_list[i] / 4, kvm->arch.enabled_hcalls);
+	for (i = 0; default_hcall_list[i]; ++i) {
+		hcall = default_hcall_list[i];
+		WARN_ON(!kvmppc_hcall_impl_pr(hcall));
+		__set_bit(hcall / 4, kvm->arch.enabled_hcalls);
+	}
 }

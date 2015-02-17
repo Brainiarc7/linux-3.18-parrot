@@ -580,8 +580,18 @@ static int mlx4_cmd_wait(struct mlx4_dev *dev, u64 in_param, u64 *out_param,
 
 	err = context->result;
 	if (err) {
-		mlx4_err(dev, "command 0x%x failed: fw status = 0x%x\n",
-			 op, context->fw_status);
+		/* Since we do not want to have this error message always
+		 * displayed at driver start when there are ConnectX2 HCAs
+		 * on the host, we deprecate the error message for this
+		 * specific command/input_mod/opcode_mod/fw-status to be debug.
+		 */
+		if (op == MLX4_CMD_SET_PORT && in_modifier == 1 &&
+		    op_modifier == 0 && context->fw_status == CMD_STAT_BAD_SIZE)
+			mlx4_dbg(dev, "command 0x%x failed: fw status = 0x%x\n",
+				 op, context->fw_status);
+		else
+			mlx4_err(dev, "command 0x%x failed: fw status = 0x%x\n",
+				 op, context->fw_status);
 		goto out;
 	}
 
@@ -1311,6 +1321,15 @@ static struct mlx4_cmd_info cmd_info[] = {
 		.wrapper = mlx4_MAD_IFC_wrapper
 	},
 	{
+		.opcode = MLX4_CMD_MAD_DEMUX,
+		.has_inbox = false,
+		.has_outbox = false,
+		.out_is_imm = false,
+		.encode_slave_id = false,
+		.verify = NULL,
+		.wrapper = mlx4_CMD_EPERM_wrapper
+	},
+	{
 		.opcode = MLX4_CMD_QUERY_IF_STAT,
 		.has_inbox = false,
 		.has_outbox = true,
@@ -1686,7 +1705,7 @@ static int mlx4_master_activate_admin_state(struct mlx4_priv *priv, int slave)
 			if (err) {
 				vp_oper->vlan_idx = NO_INDX;
 				mlx4_warn(&priv->dev,
-					  "No vlan resorces slave %d, port %d\n",
+					  "No vlan resources slave %d, port %d\n",
 					  slave, port);
 				return err;
 			}
@@ -1702,7 +1721,7 @@ static int mlx4_master_activate_admin_state(struct mlx4_priv *priv, int slave)
 				err = vp_oper->mac_idx;
 				vp_oper->mac_idx = NO_INDX;
 				mlx4_warn(&priv->dev,
-					  "No mac resorces slave %d, port %d\n",
+					  "No mac resources slave %d, port %d\n",
 					  slave, port);
 				return err;
 			}

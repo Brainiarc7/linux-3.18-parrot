@@ -189,7 +189,7 @@ try_again:
 	/* an old object from a previous incarnation is hogging the slot - we
 	 * need to wait for it to be destroyed */
 wait_for_old_object:
-	if (fscache_object_is_live(&object->fscache)) {
+	if (fscache_object_is_live(&xobject->fscache)) {
 		pr_err("\n");
 		pr_err("Error: Unexpected object collision\n");
 		cachefiles_printk_object(object, xobject);
@@ -779,7 +779,8 @@ struct dentry *cachefiles_get_directory(struct cachefiles_cache *cache,
 	    !subdir->d_inode->i_op->lookup ||
 	    !subdir->d_inode->i_op->mkdir ||
 	    !subdir->d_inode->i_op->create ||
-	    !subdir->d_inode->i_op->rename ||
+	    (!subdir->d_inode->i_op->rename &&
+	     !subdir->d_inode->i_op->rename2) ||
 	    !subdir->d_inode->i_op->rmdir ||
 	    !subdir->d_inode->i_op->unlink)
 		goto check_error;

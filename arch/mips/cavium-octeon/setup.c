@@ -263,7 +263,6 @@ static uint64_t crashk_size, crashk_base;
 static int octeon_uart;
 
 extern asmlinkage void handle_int(void);
-extern asmlinkage void plat_irq_dispatch(void);
 
 /**
  * Return non zero if we are currently running in the Octeon simulator
@@ -805,15 +804,6 @@ void __init prom_init(void)
 		else
 			strcat(arcs_cmdline, " console=ttyS0,115200");
 #endif
-	}
-
-	if (octeon_is_simulation()) {
-		/*
-		 * The simulator uses a mtdram device pre filled with
-		 * the filesystem. Also specify the calibration delay
-		 * to avoid calculating it every time.
-		 */
-		strcat(arcs_cmdline, " rw root=1f00 slram=root,0x40000000,+1073741824");
 	}
 
 	mips_hpt_frequency = octeon_get_clock_rate();

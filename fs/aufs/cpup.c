@@ -165,15 +165,17 @@ static noinline_for_stack
 int cpup_iattr(struct dentry *dst, aufs_bindex_t bindex, struct dentry *h_src,
 	       struct au_cpup_reg_attr *h_src_attr)
 {
-	int err, sbits;
+	int err, sbits, icex;
 	struct iattr ia;
 	struct path h_path;
 	struct inode *h_isrc, *h_idst;
 	struct kstat *h_st;
+	struct au_branch *br;
 
 	h_path.dentry = au_h_dptr(dst, bindex);
 	h_idst = h_path.dentry->d_inode;
-	h_path.mnt = au_sbr_mnt(dst->d_sb, bindex);
+	br = au_sbr(dst->d_sb, bindex);
+	h_path.mnt = au_br_mnt(br);
 	h_isrc = h_src->d_inode;
 	ia.ia_valid = ATTR_FORCE | ATTR_UID | ATTR_GID
 		| ATTR_ATIME | ATTR_MTIME
@@ -213,6 +215,10 @@ int cpup_iattr(struct dentry *dst, aufs_bindex_t bindex, struct dentry *h_src,
 		ia.ia_mode = h_isrc->i_mode;
 		err = vfsub_notify_change(&h_path, &ia, /*delegated*/NULL);
 	}
+
+	icex = br->br_perm & AuBrAttr_ICEX;
+	if (!err)
+		err = au_cpup_xattr(h_path.dentry, h_src, icex);
 
 	return err;
 }
@@ -1121,7 +1127,7 @@ int au_sio_cpup_wh(struct au_cp_generic *cpg, struct file *file)
 {
 	int err, wkq_err;
 	aufs_bindex_t bdst;
-	struct dentry *dentry, *parent, *h_orph, *h_parent, *h_dentry;
+	struct dentry *dentry, *parent, *h_orph, *h_parent;
 	struct inode *dir, *h_dir, *h_tmpdir;
 	struct au_wbr *wbr;
 	struct au_pin wh_pin, *pin_orig;
@@ -1144,10 +1150,6 @@ int au_sio_cpup_wh(struct au_cp_generic *cpg, struct file *file)
 		h_tmpdir = h_orph->d_inode;
 		au_set_h_iptr(dir, bdst, au_igrab(h_tmpdir), /*flags*/0);
 
-		if (file)
-			h_dentry = au_hf_top(file)->f_dentry;
-		else
-			h_dentry = au_h_dptr(dentry, au_dbstart(dentry));
 		mutex_lock_nested(&h_tmpdir->i_mutex, AuLsc_I_PARENT3);
 		/* todo: au_h_open_pre()? */
 

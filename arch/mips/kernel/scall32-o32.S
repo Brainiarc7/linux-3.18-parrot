@@ -67,8 +67,6 @@ NESTED(handle_sys, PT_SIZE, sp)
 
 	/*
 	 * Ok, copy the args from the luser stack to the kernel stack.
-	 * t3 is the precomputed number of instruction bytes needed to
-	 * load or store arguments 6-8.
 	 */
 
 	.set    push
@@ -578,6 +576,7 @@ EXPORT(sys_call_table)
 	PTR	sys_sched_setattr
 	PTR	sys_sched_getattr		/* 4350 */
 	PTR	sys_renameat2
-	PTR	sys_ni_syscall			/* seccomp */
-	PTR	sys_ni_syscall			/* getrandom */
+	PTR	sys_seccomp
+	PTR	sys_getrandom
 	PTR	sys_memfd_create
+	PTR	sys_bpf				/* 4355 */

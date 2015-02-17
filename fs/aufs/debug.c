@@ -169,7 +169,7 @@ void au_dpri_dalias(struct inode *inode)
 	struct dentry *d;
 
 	spin_lock(&inode->i_lock);
-	hlist_for_each_entry(d, &inode->i_dentry, d_alias)
+	hlist_for_each_entry(d, &inode->i_dentry, d_u.d_alias)
 		au_dpri_dentry(d);
 	spin_unlock(&inode->i_lock);
 }
@@ -189,7 +189,7 @@ static int do_pri_dentry(aufs_bindex_t bindex, struct dentry *dentry)
 	dpri("d%d: %p, %pd2?, %s, cnt %d, flags 0x%x, %shashed\n",
 	     bindex, dentry, dentry,
 	     dentry->d_sb ? au_sbtype(dentry->d_sb) : "??",
-	     d_count(dentry), dentry->d_flags,
+	     au_dcount(dentry), dentry->d_flags,
 	     d_unhashed(dentry) ? "un" : "");
 	hn = -1;
 	if (bindex >= 0 && dentry->d_inode && au_test_aufs(dentry->d_sb)) {

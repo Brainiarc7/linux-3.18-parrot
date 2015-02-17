@@ -35,6 +35,7 @@
 
 #include <asm/reg.h>
 #include <asm/cputable.h>
+#include <asm/cache.h>
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <asm/uaccess.h>
@@ -68,6 +69,13 @@
 #define TB_NIL	(~(u64)0)
 
 static DECLARE_BITMAP(default_enabled_hcalls, MAX_HCALL_OPCODE/4 + 1);
+
+#if defined(CONFIG_PPC_64K_PAGES)
+#define MPP_BUFFER_ORDER	0
+#elif defined(CONFIG_PPC_4K_PAGES)
+#define MPP_BUFFER_ORDER	3
+#endif
+
 
 static void kvmppc_end_cede(struct kvm_vcpu *vcpu);
 static int kvmppc_hv_setup_htab_rma(struct kvm_vcpu *vcpu);
@@ -557,6 +565,48 @@ static void kvmppc_create_dtl_entry(struct kvm_vcpu *vcpu,
 	vcpu->arch.dtl.dirty = true;
 }
 
+static bool kvmppc_power8_compatible(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->arch.vcore->arch_compat >= PVR_ARCH_207)
+		return true;
+	if ((!vcpu->arch.vcore->arch_compat) &&
+	    cpu_has_feature(CPU_FTR_ARCH_207S))
+		return true;
+	return false;
+}
+
+static int kvmppc_h_set_mode(struct kvm_vcpu *vcpu, unsigned long mflags,
+			     unsigned long resource, unsigned long value1,
+			     unsigned long value2)
+{
+	switch (resource) {
+	case H_SET_MODE_RESOURCE_SET_CIABR:
+		if (!kvmppc_power8_compatible(vcpu))
+			return H_P2;
+		if (value2)
+			return H_P4;
+		if (mflags)
+			return H_UNSUPPORTED_FLAG_START;
+		/* Guests can't breakpoint the hypervisor */
+		if ((value1 & CIABR_PRIV) == CIABR_PRIV_HYPER)
+			return H_P3;
+		vcpu->arch.ciabr  = value1;
+		return H_SUCCESS;
+	case H_SET_MODE_RESOURCE_SET_DAWR:
+		if (!kvmppc_power8_compatible(vcpu))
+			return H_P2;
+		if (mflags)
+			return H_UNSUPPORTED_FLAG_START;
+		if (value2 & DABRX_HYP)
+			return H_P4;
+		vcpu->arch.dawr  = value1;
+		vcpu->arch.dawrx = value2;
+		return H_SUCCESS;
+	default:
+		return H_TOO_HARD;
+	}
+}
+
 int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 {
 	unsigned long req = kvmppc_get_gpr(vcpu, 3);
@@ -626,7 +676,14 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 
 		/* Send the error out to userspace via KVM_RUN */
 		return rc;
-
+	case H_SET_MODE:
+		ret = kvmppc_h_set_mode(vcpu, kvmppc_get_gpr(vcpu, 4),
+					kvmppc_get_gpr(vcpu, 5),
+					kvmppc_get_gpr(vcpu, 6),
+					kvmppc_get_gpr(vcpu, 7));
+		if (ret == H_TOO_HARD)
+			return RESUME_HOST;
+		break;
 	case H_XIRR:
 	case H_CPPR:
 	case H_EOI:
@@ -643,6 +700,53 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 	kvmppc_set_gpr(vcpu, 3, ret);
 	vcpu->arch.hcall_needed = 0;
 	return RESUME_GUEST;
+}
+
+static int kvmppc_hcall_impl_hv(unsigned long cmd)
+{
+	switch (cmd) {
+	case H_CEDE:
+	case H_PROD:
+	case H_CONFER:
+	case H_REGISTER_VPA:
+	case H_SET_MODE:
+#ifdef CONFIG_KVM_XICS
+	case H_XIRR:
+	case H_CPPR:
+	case H_EOI:
+	case H_IPI:
+	case H_IPOLL:
+	case H_XIRR_X:
+#endif
+		return 1;
+	}
+
+	/* See if it's in the real-mode table */
+	return kvmppc_hcall_impl_hv_realmode(cmd);
+}
+
+static int kvmppc_emulate_debug_inst(struct kvm_run *run,
+					struct kvm_vcpu *vcpu)
+{
+	u32 last_inst;
+
+	if (kvmppc_get_last_inst(vcpu, INST_GENERIC, &last_inst) !=
+					EMULATE_DONE) {
+		/*
+		 * Fetch failed, so return to guest and
+		 * try executing it again.
+		 */
+		return RESUME_GUEST;
+	}
+
+	if (last_inst == KVMPPC_INST_SW_BREAKPOINT) {
+		run->exit_reason = KVM_EXIT_DEBUG;
+		run->debug.arch.address = kvmppc_get_pc(vcpu);
+		return RESUME_HOST;
+	} else {
+		kvmppc_core_queue_program(vcpu, SRR1_PROGILL);
+		return RESUME_GUEST;
+	}
 }
 
 static int kvmppc_handle_exit_hv(struct kvm_run *run, struct kvm_vcpu *vcpu,
@@ -727,12 +831,18 @@ static int kvmppc_handle_exit_hv(struct kvm_run *run, struct kvm_vcpu *vcpu,
 		break;
 	/*
 	 * This occurs if the guest executes an illegal instruction.
-	 * We just generate a program interrupt to the guest, since
-	 * we don't emulate any guest instructions at this stage.
+	 * If the guest debug is disabled, generate a program interrupt
+	 * to the guest. If guest debug is enabled, we need to check
+	 * whether the instruction is a software breakpoint instruction.
+	 * Accordingly return to Guest or Host.
 	 */
 	case BOOK3S_INTERRUPT_H_EMUL_ASSIST:
-		kvmppc_core_queue_program(vcpu, SRR1_PROGILL);
-		r = RESUME_GUEST;
+		if (vcpu->guest_debug & KVM_GUESTDBG_USE_SW_BP) {
+			r = kvmppc_emulate_debug_inst(run, vcpu);
+		} else {
+			kvmppc_core_queue_program(vcpu, SRR1_PROGILL);
+			r = RESUME_GUEST;
+		}
 		break;
 	/*
 	 * This occurs if the guest (kernel or userspace), does something that
@@ -776,7 +886,9 @@ static int kvm_arch_vcpu_ioctl_set_sregs_hv(struct kvm_vcpu *vcpu,
 {
 	int i, j;
 
-	kvmppc_set_pvr_hv(vcpu, sregs->pvr);
+	/* Only accept the same PVR as the host's, since we can't spoof it */
+	if (sregs->pvr != vcpu->arch.pvr)
+		return -EINVAL;
 
 	j = 0;
 	for (i = 0; i < vcpu->arch.slb_nr; i++) {
@@ -842,6 +954,9 @@ static int kvmppc_get_one_reg_hv(struct kvm_vcpu *vcpu, u64 id,
 	long int i;
 
 	switch (id) {
+	case KVM_REG_PPC_DEBUG_INST:
+		*val = get_reg_val(id, KVMPPC_INST_SW_BREAKPOINT);
+		break;
 	case KVM_REG_PPC_HIOR:
 		*val = get_reg_val(id, 0);
 		break;
@@ -904,12 +1019,6 @@ static int kvmppc_get_one_reg_hv(struct kvm_vcpu *vcpu, u64 id,
 		break;
 	case KVM_REG_PPC_CIABR:
 		*val = get_reg_val(id, vcpu->arch.ciabr);
-		break;
-	case KVM_REG_PPC_IC:
-		*val = get_reg_val(id, vcpu->arch.ic);
-		break;
-	case KVM_REG_PPC_VTB:
-		*val = get_reg_val(id, vcpu->arch.vtb);
 		break;
 	case KVM_REG_PPC_CSIGR:
 		*val = get_reg_val(id, vcpu->arch.csigr);
@@ -1106,12 +1215,6 @@ static int kvmppc_set_one_reg_hv(struct kvm_vcpu *vcpu, u64 id,
 		if ((vcpu->arch.ciabr & CIABR_PRIV) == CIABR_PRIV_HYPER)
 			vcpu->arch.ciabr &= ~CIABR_PRIV;	/* disable */
 		break;
-	case KVM_REG_PPC_IC:
-		vcpu->arch.ic = set_reg_val(id, *val);
-		break;
-	case KVM_REG_PPC_VTB:
-		vcpu->arch.vtb = set_reg_val(id, *val);
-		break;
 	case KVM_REG_PPC_CSIGR:
 		vcpu->arch.csigr = set_reg_val(id, *val);
 		break;
@@ -1243,6 +1346,33 @@ static int kvmppc_set_one_reg_hv(struct kvm_vcpu *vcpu, u64 id,
 	return r;
 }
 
+static struct kvmppc_vcore *kvmppc_vcore_create(struct kvm *kvm, int core)
+{
+	struct kvmppc_vcore *vcore;
+
+	vcore = kzalloc(sizeof(struct kvmppc_vcore), GFP_KERNEL);
+
+	if (vcore == NULL)
+		return NULL;
+
+	INIT_LIST_HEAD(&vcore->runnable_threads);
+	spin_lock_init(&vcore->lock);
+	init_waitqueue_head(&vcore->wq);
+	vcore->preempt_tb = TB_NIL;
+	vcore->lpcr = kvm->arch.lpcr;
+	vcore->first_vcpuid = core * threads_per_subcore;
+	vcore->kvm = kvm;
+
+	vcore->mpp_buffer_is_valid = false;
+
+	if (cpu_has_feature(CPU_FTR_ARCH_207S))
+		vcore->mpp_buffer = (void *)__get_free_pages(
+			GFP_KERNEL|__GFP_ZERO,
+			MPP_BUFFER_ORDER);
+
+	return vcore;
+}
+
 static struct kvm_vcpu *kvmppc_core_vcpu_create_hv(struct kvm *kvm,
 						   unsigned int id)
 {
@@ -1294,16 +1424,7 @@ static struct kvm_vcpu *kvmppc_core_vcpu_create_hv(struct kvm *kvm,
 	mutex_lock(&kvm->lock);
 	vcore = kvm->arch.vcores[core];
 	if (!vcore) {
-		vcore = kzalloc(sizeof(struct kvmppc_vcore), GFP_KERNEL);
-		if (vcore) {
-			INIT_LIST_HEAD(&vcore->runnable_threads);
-			spin_lock_init(&vcore->lock);
-			init_waitqueue_head(&vcore->wq);
-			vcore->preempt_tb = TB_NIL;
-			vcore->lpcr = kvm->arch.lpcr;
-			vcore->first_vcpuid = core * threads_per_subcore;
-			vcore->kvm = kvm;
-		}
+		vcore = kvmppc_vcore_create(kvm, core);
 		kvm->arch.vcores[core] = vcore;
 		kvm->arch.online_vcores++;
 	}
@@ -1403,7 +1524,7 @@ static void kvmppc_remove_runnable(struct kvmppc_vcore *vc,
 static int kvmppc_grab_hwthread(int cpu)
 {
 	struct paca_struct *tpaca;
-	long timeout = 1000;
+	long timeout = 10000;
 
 	tpaca = &paca[cpu];
 
@@ -1515,6 +1636,33 @@ static int on_primary_thread(void)
 	return 1;
 }
 
+static void kvmppc_start_saving_l2_cache(struct kvmppc_vcore *vc)
+{
+	phys_addr_t phy_addr, mpp_addr;
+
+	phy_addr = (phys_addr_t)virt_to_phys(vc->mpp_buffer);
+	mpp_addr = phy_addr & PPC_MPPE_ADDRESS_MASK;
+
+	mtspr(SPRN_MPPR, mpp_addr | PPC_MPPR_FETCH_ABORT);
+	logmpp(mpp_addr | PPC_LOGMPP_LOG_L2);
+
+	vc->mpp_buffer_is_valid = true;
+}
+
+static void kvmppc_start_restoring_l2_cache(const struct kvmppc_vcore *vc)
+{
+	phys_addr_t phy_addr, mpp_addr;
+
+	phy_addr = virt_to_phys(vc->mpp_buffer);
+	mpp_addr = phy_addr & PPC_MPPE_ADDRESS_MASK;
+
+	/* We must abort any in-progress save operations to ensure
+	 * the table is valid so that prefetch engine knows when to
+	 * stop prefetching. */
+	logmpp(mpp_addr | PPC_LOGMPP_LOG_ABORT);
+	mtspr(SPRN_MPPR, mpp_addr | PPC_MPPR_FETCH_WHOLE_TABLE);
+}
+
 /*
  * Run a set of guest threads on a physical core.
  * Called with vc->lock held.
@@ -1592,9 +1740,16 @@ static void kvmppc_run_core(struct kvmppc_vcore *vc)
 
 	srcu_idx = srcu_read_lock(&vc->kvm->srcu);
 
+	if (vc->mpp_buffer_is_valid)
+		kvmppc_start_restoring_l2_cache(vc);
+
 	__kvmppc_vcore_entry();
 
 	spin_lock(&vc->lock);
+
+	if (vc->mpp_buffer)
+		kvmppc_start_saving_l2_cache(vc);
+
 	/* disable sending of IPIs on virtual external irqs */
 	list_for_each_entry(vcpu, &vc->runnable_threads, arch.run_list)
 		vcpu->cpu = -1;
@@ -1944,12 +2099,6 @@ static void kvmppc_add_seg_page_size(struct kvm_ppc_one_seg_page_size **sps,
 	(*sps)->page_shift = def->shift;
 	(*sps)->slb_enc = def->sllp;
 	(*sps)->enc[0].page_shift = def->shift;
-	/*
-	 * Only return base page encoding. We don't want to return
-	 * all the supporting pte_enc, because our H_ENTER doesn't
-	 * support MPSS yet. Once they do, we can start passing all
-	 * support pte_enc here
-	 */
 	(*sps)->enc[0].pte_enc = def->penc[linux_psize];
 	/*
 	 * Add 16MB MPSS support if host supports it
@@ -2342,8 +2491,14 @@ static void kvmppc_free_vcores(struct kvm *kvm)
 {
 	long int i;
 
-	for (i = 0; i < KVM_MAX_VCORES; ++i)
+	for (i = 0; i < KVM_MAX_VCORES; ++i) {
+		if (kvm->arch.vcores[i] && kvm->arch.vcores[i]->mpp_buffer) {
+			struct kvmppc_vcore *vc = kvm->arch.vcores[i];
+			free_pages((unsigned long)vc->mpp_buffer,
+				   MPP_BUFFER_ORDER);
+		}
 		kfree(kvm->arch.vcores[i]);
+	}
 	kvm->arch.online_vcores = 0;
 }
 
@@ -2472,9 +2627,13 @@ static unsigned int default_hcall_list[] = {
 static void init_default_hcalls(void)
 {
 	int i;
+	unsigned int hcall;
 
-	for (i = 0; default_hcall_list[i]; ++i)
-		__set_bit(default_hcall_list[i] / 4, default_enabled_hcalls);
+	for (i = 0; default_hcall_list[i]; ++i) {
+		hcall = default_hcall_list[i];
+		WARN_ON(!kvmppc_hcall_impl_hv(hcall));
+		__set_bit(hcall / 4, default_enabled_hcalls);
+	}
 }
 
 static struct kvmppc_ops kvm_ops_hv = {
@@ -2509,6 +2668,7 @@ static struct kvmppc_ops kvm_ops_hv = {
 	.emulate_mfspr = kvmppc_core_emulate_mfspr_hv,
 	.fast_vcpu_kick = kvmppc_fast_vcpu_kick_hv,
 	.arch_vm_ioctl  = kvm_arch_vm_ioctl_hv,
+	.hcall_implemented = kvmppc_hcall_impl_hv,
 };
 
 static int kvmppc_book3s_init_hv(void)
