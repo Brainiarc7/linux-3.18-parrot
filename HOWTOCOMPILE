@@ -1,11 +1,11 @@
 AMD64
 	cp config-amd64 .config
-	make -j3 deb-pkg LOCALVERSION=-amd64 KDEB_PKGVERSION=3.16-custom
+	make -j3 deb-pkg LOCALVERSION=-amd64 KDEB_PKGVERSION=3.18-custom
 
 686-PAE
 	cp config-686-pae .config
-	make -j3 deb-pkg LOCALVERSION=-686-pae KDEB_PKGVERSION=3.16-custom
+	make -j3 deb-pkg LOCALVERSION=-686-pae KDEB_PKGVERSION=3.18-custom
 
 486
 	cp config-486 .config
-	make -j3 deb-pkg LOCALVERSION=-486 KDEB_PKGVERSION=3.16-custom
+	make -j3 deb-pkg LOCALVERSION=-486 KDEB_PKGVERSION=3.18-custom
